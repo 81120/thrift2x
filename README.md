@@ -1,99 +1,55 @@
 # thrift2x
 
-`thrift2x` is a batch Thrift conversion tool written in Go. It currently supports converting `.thrift` files into TypeScript type definitions.
+`thrift2x` is a Go-based CLI tool for batch-converting Thrift IDL files.
 
-## Feature Overview
+Today it supports one target:
 
-- Recursively scans `.thrift` files under the input directory
-- Supports excluding files/directories by path substring
-- Parses and generates in parallel, with support for `jobs=auto`
-- Uses a target-language plugin mechanism to output corresponding file extensions
-- Built-in target: `typescript`
+- `typescript` → generates `.ts` type definitions from `.thrift`
 
----
+## Why thrift2x
 
-## Architecture
+- Recursive conversion for entire IDL directories
+- Parallel parsing/generation (`--jobs auto` or fixed workers)
+- Path-based exclude rules
+- Pluggable target system for future language backends
 
-### 1) CLI Layer (Command Entry)
+## Installation
 
-- `cmd/thrift2x/main.go`
-  - Program entry point, runs `newRootCmd().Execute()`
-  - Includes `normalizeLegacySingleDashLongFlags()`: normalizes flags like `-target` to `--target`
-- `cmd/thrift2x/root.go`
-  - Root command: `thrift2x`
-  - Subcommands:
-    - `generate`: performs conversion
-    - `targets`: lists supported targets
-  - Key `generate` flags:
-    - `--in` input directory (required)
-    - `--out` output directory (required)
-    - `--target` output target (required)
-    - `--exclude` excluded path substrings (optional, comma-separated)
-    - `--jobs` concurrency level (integer or `auto`)
-    - `--i64-type` only applies to TypeScript target (`string|number|bigint`)
+### Install via `go install`
 
-### 2) Conversion Orchestration Layer (converter)
+```bash
+go install github.com/81120/thrift2x/cmd/thrift2x@latest
+```
 
-- `internal/converter/converter.go`
-  - `Run(cfg Config)` handles the full workflow:
-    1. Validate input arguments
-    2. Load target from registry using `cfg.Target`
-    3. Create generator (with target options)
-    4. Scan Thrift files
-    5. Resolve concurrency level
-    6. Process files concurrently
-    7. Aggregate results and timing stats
-- `internal/converter/scan.go`
-  - `collectThriftFiles`: recursively collects `.thrift` files
-  - `shouldExclude`: filters by path substring
-- `internal/converter/worker.go`
-  - `runWorkers`: fixed worker pool for parallel processing
-  - `resolveJobs/autoJobs`: parses `jobs` or auto-calculates concurrency
-- `internal/converter/process.go`
-  - `processFile`:
-    1. Read file
-    2. Parse AST with parser
-    3. Generate code via target generator
-    4. Compute relative path and write to output directory
-    5. Remove existing target file if generated content is empty
+### Build locally
 
-### 3) Syntax Parsing Layer (parser + AST)
+```bash
+git clone <your-fork-or-this-repo>
+cd thrift2x
+go build -o thrift2x ./cmd/thrift2x
+```
 
-- `internal/parser/parser.go`
-  - Custom lexer + parser
-  - Outputs a unified AST structure
-- `internal/ast/ast.go`
-  - Defines AST nodes: `File/Decl/StructLike/Enum/Typedef/TypeRef`, etc.
-  - Provides a unified input model for target generators
+## Quick Start
 
-### 4) Target Extension Layer
+Given a project structure like:
 
-- `internal/targets/target.go`
-  - Defines `Target` and `Generator` interfaces
-- `internal/targets/registry.go`
-  - Global registry: `Register/Get/List`
-- `internal/targets/typescript/*`
-  - TypeScript target implementation and tests
-- `internal/converter/converter.go`
-  - Registers built-in targets via blank import (currently only `typescript`)
+```text
+./idl
+├── user.thrift
+└── order.thrift
+```
 
----
+Run:
 
-## Execution Flow
+```bash
+thrift2x generate --in ./idl --out ./gen --target typescript
+```
 
-1. User runs `thrift2x generate ...`
-2. CLI assembles `converter.Config`
-3. Converter selects generator by target
-4. Scans `.thrift` file list
-5. Worker pool parses + generates in parallel
-6. Writes output files (`.ts`) using paths relative to input directory
-7. Prints summary stats (`total/success/failed/jobs + timing`)
+Generated files will be written to `./gen` with the same relative directory layout.
 
----
+## CLI
 
-## Usage
-
-## 1. List supported targets
+### List supported targets
 
 ```bash
 thrift2x targets
@@ -105,7 +61,7 @@ Current output:
 typescript
 ```
 
-## 2. Generate TypeScript
+### Generate code
 
 ```bash
 thrift2x generate \
@@ -114,7 +70,26 @@ thrift2x generate \
   --target typescript
 ```
 
-## 3. Customize i64 mapping (TypeScript only)
+## Configuration
+
+### Required flags
+
+- `--in`: input directory containing `.thrift` files
+- `--out`: output directory
+- `--target`: generation target
+
+### Optional flags
+
+- `--exclude`: comma-separated path substrings to skip
+  - Example: `--exclude third_party,legacy`
+- `--jobs`: worker count (`auto` by default)
+  - Example: `--jobs 8`
+- `--i64-type`: TypeScript-only i64 mapping
+  - Values: `string` (default), `number`, `bigint`
+
+## Examples
+
+### TypeScript with bigint for i64
 
 ```bash
 thrift2x generate \
@@ -124,9 +99,7 @@ thrift2x generate \
   --i64-type bigint
 ```
 
-Available values: `string` (default), `number`, `bigint`
-
-## 4. Exclude specific paths
+### Exclude some paths
 
 ```bash
 thrift2x generate \
@@ -136,36 +109,66 @@ thrift2x generate \
   --exclude third_party,legacy
 ```
 
-## 5. Adjust concurrency
+### Set fixed concurrency
 
 ```bash
-# Auto concurrency (default)
-thrift2x generate --in ./idl --out ./gen --target typescript --jobs auto
-
-# Fixed concurrency
 thrift2x generate --in ./idl --out ./gen --target typescript --jobs 8
 ```
 
----
+## Error Behavior
 
-## Errors and Constraints
-
-- `--target` is required
-- `--in` and `--out` are required
-- If target does not exist, an error is returned with available targets
+- Missing required flags (`--in`, `--out`, `--target`) returns an error
+- Unknown target returns an error and shows available targets
 - `--i64-type` is ignored for non-TypeScript targets
 
----
+## Development
 
-## Development and Testing
+Run tests:
 
 ```bash
 go test ./...
 ```
 
-To view local command help:
+Run locally without install:
 
 ```bash
 go run ./cmd/thrift2x --help
 go run ./cmd/thrift2x generate --help
 ```
+
+## Architecture Overview
+
+### CLI layer
+
+- `cmd/thrift2x/main.go`
+  - entry point
+  - normalizes legacy single-dash long flags (`-target` → `--target`)
+- `cmd/thrift2x/root.go`
+  - root command and subcommands (`generate`, `targets`)
+
+### Conversion orchestration
+
+- `internal/converter/converter.go`
+  - validates config, resolves target, runs full pipeline
+- `internal/converter/scan.go`
+  - file discovery + exclude filtering
+- `internal/converter/worker.go`
+  - worker pool + jobs resolution
+- `internal/converter/process.go`
+  - parse, generate, and write each file
+
+### Parser and AST
+
+- `internal/parser/parser.go`
+  - custom lexer/parser
+- `internal/ast/ast.go`
+  - shared AST model used by targets
+
+### Target system
+
+- `internal/targets/target.go`
+  - target/generator interfaces
+- `internal/targets/registry.go`
+  - register/get/list target registry
+- `internal/targets/typescript/*`
+  - built-in TypeScript target
