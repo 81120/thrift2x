@@ -1,111 +1,111 @@
 # thrift2x
 
-`thrift2x` 是一个用 Go 编写的 Thrift 文件批量转换工具，当前支持将 `.thrift` 转成 TypeScript 类型定义。
+`thrift2x` is a batch Thrift conversion tool written in Go. It currently supports converting `.thrift` files into TypeScript type definitions.
 
-## 功能概览
+## Feature Overview
 
-- 递归扫描输入目录下的 `.thrift` 文件
-- 支持按路径子串排除文件/目录
-- 并行解析与生成，支持 `jobs=auto`
-- 基于目标语言（target）插件机制输出对应文件扩展名
-- 当前内置 target：`typescript`
+- Recursively scans `.thrift` files under the input directory
+- Supports excluding files/directories by path substring
+- Parses and generates in parallel, with support for `jobs=auto`
+- Uses a target-language plugin mechanism to output corresponding file extensions
+- Built-in target: `typescript`
 
 ---
 
-## 架构设计
+## Architecture
 
-### 1) CLI 层（命令入口）
+### 1) CLI Layer (Command Entry)
 
 - `cmd/thrift2x/main.go`
-  - 程序入口，执行 `newRootCmd().Execute()`
-  - 包含 `normalizeLegacySingleDashLongFlags()`：把形如 `-target` 归一为 `--target`
+  - Program entry point, runs `newRootCmd().Execute()`
+  - Includes `normalizeLegacySingleDashLongFlags()`: normalizes flags like `-target` to `--target`
 - `cmd/thrift2x/root.go`
-  - 根命令 `thrift2x`
-  - 子命令：
-    - `generate`：执行转换
-    - `targets`：列出支持的 target
-  - `generate` 关键参数：
-    - `--in` 输入目录（必填）
-    - `--out` 输出目录（必填）
-    - `--target` 输出目标（必填）
-    - `--exclude` 排除路径子串（可选，逗号分隔）
-    - `--jobs` 并行度（整数或 `auto`）
-    - `--i64-type` 仅 TypeScript target 生效（`string|number|bigint`）
+  - Root command: `thrift2x`
+  - Subcommands:
+    - `generate`: performs conversion
+    - `targets`: lists supported targets
+  - Key `generate` flags:
+    - `--in` input directory (required)
+    - `--out` output directory (required)
+    - `--target` output target (required)
+    - `--exclude` excluded path substrings (optional, comma-separated)
+    - `--jobs` concurrency level (integer or `auto`)
+    - `--i64-type` only applies to TypeScript target (`string|number|bigint`)
 
-### 2) 转换编排层（converter）
+### 2) Conversion Orchestration Layer (converter)
 
 - `internal/converter/converter.go`
-  - `Run(cfg Config)` 负责整体流程：
-    1. 校验输入参数
-    2. 根据 `cfg.Target` 从 registry 获取 target
-    3. 创建 generator（携带 target options）
-    4. 扫描 thrift 文件
-    5. 解析并行度
-    6. 并发处理每个文件
-    7. 聚合结果与耗时统计
+  - `Run(cfg Config)` handles the full workflow:
+    1. Validate input arguments
+    2. Load target from registry using `cfg.Target`
+    3. Create generator (with target options)
+    4. Scan Thrift files
+    5. Resolve concurrency level
+    6. Process files concurrently
+    7. Aggregate results and timing stats
 - `internal/converter/scan.go`
-  - `collectThriftFiles`：递归遍历目录，收集 `.thrift`
-  - `shouldExclude`：基于路径子串过滤
+  - `collectThriftFiles`: recursively collects `.thrift` files
+  - `shouldExclude`: filters by path substring
 - `internal/converter/worker.go`
-  - `runWorkers`：固定 worker 池并行处理文件
-  - `resolveJobs/autoJobs`：解析 `jobs` 或自动计算并发
+  - `runWorkers`: fixed worker pool for parallel processing
+  - `resolveJobs/autoJobs`: parses `jobs` or auto-calculates concurrency
 - `internal/converter/process.go`
-  - `processFile`：
-    1. 读文件
-    2. 调用 parser 解析 AST
-    3. 调用 target generator 生成代码
-    4. 计算相对路径并写入输出目录
-    5. 若生成内容为空则删除已有目标文件
+  - `processFile`:
+    1. Read file
+    2. Parse AST with parser
+    3. Generate code via target generator
+    4. Compute relative path and write to output directory
+    5. Remove existing target file if generated content is empty
 
-### 3) 语法解析层（parser + AST）
+### 3) Syntax Parsing Layer (parser + AST)
 
 - `internal/parser/parser.go`
-  - 自定义 lexer + parser
-  - 输出统一 AST 结构
+  - Custom lexer + parser
+  - Outputs a unified AST structure
 - `internal/ast/ast.go`
-  - 定义 AST 节点：`File/Decl/StructLike/Enum/Typedef/TypeRef` 等
-  - 为 target generator 提供统一输入模型
+  - Defines AST nodes: `File/Decl/StructLike/Enum/Typedef/TypeRef`, etc.
+  - Provides a unified input model for target generators
 
-### 4) Target 扩展层
+### 4) Target Extension Layer
 
 - `internal/targets/target.go`
-  - 定义 `Target` 与 `Generator` 接口
+  - Defines `Target` and `Generator` interfaces
 - `internal/targets/registry.go`
-  - 全局注册中心：`Register/Get/List`
+  - Global registry: `Register/Get/List`
 - `internal/targets/typescript/*`
-  - TypeScript target 实现与测试
+  - TypeScript target implementation and tests
 - `internal/converter/converter.go`
-  - 通过空白导入注册内置 target（当前仅 `typescript`）
+  - Registers built-in targets via blank import (currently only `typescript`)
 
 ---
 
-## 执行流程
+## Execution Flow
 
-1. 用户执行 `thrift2x generate ...`
-2. CLI 组装 `converter.Config`
-3. Converter 按 target 选择 generator
-4. 扫描 `.thrift` 文件列表
-5. Worker 池并行解析 + 生成
-6. 按输入目录相对路径写出目标文件（`.ts`）
-7. 输出统计信息（total/success/failed/jobs + timing）
+1. User runs `thrift2x generate ...`
+2. CLI assembles `converter.Config`
+3. Converter selects generator by target
+4. Scans `.thrift` file list
+5. Worker pool parses + generates in parallel
+6. Writes output files (`.ts`) using paths relative to input directory
+7. Prints summary stats (`total/success/failed/jobs + timing`)
 
 ---
 
-## 使用说明
+## Usage
 
-## 1. 查看支持的 target
+## 1. List supported targets
 
 ```bash
 thrift2x targets
 ```
 
-当前输出：
+Current output:
 
 ```text
 typescript
 ```
 
-## 2. 生成 TypeScript
+## 2. Generate TypeScript
 
 ```bash
 thrift2x generate \
@@ -114,7 +114,7 @@ thrift2x generate \
   --target typescript
 ```
 
-## 3. 自定义 i64 映射（仅 TypeScript 生效）
+## 3. Customize i64 mapping (TypeScript only)
 
 ```bash
 thrift2x generate \
@@ -124,9 +124,9 @@ thrift2x generate \
   --i64-type bigint
 ```
 
-可选值：`string`（默认）、`number`、`bigint`
+Available values: `string` (default), `number`, `bigint`
 
-## 4. 排除部分路径
+## 4. Exclude specific paths
 
 ```bash
 thrift2x generate \
@@ -136,34 +136,34 @@ thrift2x generate \
   --exclude third_party,legacy
 ```
 
-## 5. 调整并行度
+## 5. Adjust concurrency
 
 ```bash
-# 自动并行（默认）
+# Auto concurrency (default)
 thrift2x generate --in ./idl --out ./gen --target typescript --jobs auto
 
-# 固定并行
+# Fixed concurrency
 thrift2x generate --in ./idl --out ./gen --target typescript --jobs 8
 ```
 
 ---
 
-## 错误与约束
+## Errors and Constraints
 
-- `--target` 必填
-- `--in` 与 `--out` 必填
-- target 不存在时会报错并列出可用 target
-- `--i64-type` 在非 TypeScript target 下会被忽略
+- `--target` is required
+- `--in` and `--out` are required
+- If target does not exist, an error is returned with available targets
+- `--i64-type` is ignored for non-TypeScript targets
 
 ---
 
-## 开发与测试
+## Development and Testing
 
 ```bash
 go test ./...
 ```
 
-如果需要本地查看命令帮助：
+To view local command help:
 
 ```bash
 go run ./cmd/thrift2x --help
